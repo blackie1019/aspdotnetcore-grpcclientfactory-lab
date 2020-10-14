@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
+using Serilog;
 
 namespace GrpcClientFactory.Lab.Client.BackgroundServices
 {
@@ -21,12 +22,12 @@ namespace GrpcClientFactory.Lab.Client.BackgroundServices
                 try
                 {
                     var reply = await _client.SayHelloAsync(new HelloRequest { Name = "GrpcClientFactory.Lab.Client" });
-                    Console.WriteLine(reply.Message);
-                    Console.WriteLine("done");
+                    Log.Information(reply.Message);
+                    Log.Information("done");
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine(e);
+                    Log.Error(e,);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);

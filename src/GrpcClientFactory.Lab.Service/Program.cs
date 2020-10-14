@@ -2,6 +2,7 @@ using System;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Hosting;
+using Serilog;
 
 namespace GrpcClientFactory.Lab.Service
 {
@@ -9,6 +10,12 @@ namespace GrpcClientFactory.Lab.Service
     {
         public static void Main(string[] args)
         {
+            Log.Logger = new LoggerConfiguration()
+                .Enrich.FromLogContext()
+                .WriteTo.Console()
+                .WriteTo.File("logs/application.log", rollingInterval: RollingInterval.Hour)
+                .CreateLogger();
+            
             CreateHostBuilder(args).Build().Run();
         }
 
@@ -16,12 +23,13 @@ namespace GrpcClientFactory.Lab.Service
         // For instructions on how to configure Kestrel and gRPC clients on macOS, visit https://go.microsoft.com/fwlink/?linkid=2099682
         public static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
+                .UseSerilog()
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
                     var environmentName = webBuilder.GetSetting("Environment");
                     if (string.Compare(environmentName,"Development",StringComparison.InvariantCultureIgnoreCase)==0)
                     {
-                        Console.WriteLine(environmentName);
+                        Log.Information(environmentName);
                         webBuilder.ConfigureKestrel(options =>
                         {
                             // Setup a HTTP/2 endpoint without TLS.
