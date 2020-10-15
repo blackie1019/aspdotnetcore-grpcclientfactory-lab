@@ -38,6 +38,9 @@ namespace GrpcClientFactory.Lab.Client
                         {
                             // Setup a HTTP/2 endpoint without TLS.
                             options.ListenLocalhost(6001, o => o.Protocols = HttpProtocols.Http2);
+                            // Setup a HTTP1 for RestfulAPI
+                            options.ListenLocalhost(6002, o => o.Protocols =
+                                HttpProtocols.Http1);
                         });
                     }
 

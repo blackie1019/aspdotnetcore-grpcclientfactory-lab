@@ -22,15 +22,14 @@ namespace GrpcClientFactory.Lab.Client.BackgroundServices
                 try
                 {
                     var reply = await _client.SayHelloAsync(new HelloRequest { Name = "GrpcClientFactory.Lab.Client" });
-                    Log.Information(reply.Message);
-                    Log.Information("done");
+                    Log.Information($"Done!, {reply.Message}");
                 }
                 catch (Exception e)
                 {
-                    Log.Error(e,);
+                    //Log.Error(e.Message, e.StackTrace);
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
         }
     }

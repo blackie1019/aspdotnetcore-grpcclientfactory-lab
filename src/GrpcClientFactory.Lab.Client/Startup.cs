@@ -6,6 +6,7 @@ using Grpc.Core;
 using GrpcClientFactory.Lab.Client.BackgroundServices;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Polly;
@@ -49,32 +50,47 @@ namespace GrpcClientFactory.Lab.Client
 
                         var grpcStatus = StatusManager.GetStatusCode(r);
                         var httpStatusCode = r.StatusCode;
-                        Log.Information($"{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
+                        
+                        var hasConnectionIssue = grpcStatus == null &&
+                                                 serverErrors.Contains(httpStatusCode) || // if the server send an error before gRPC pipeline
+                                                 (httpStatusCode == HttpStatusCode.OK &&
+                                                 gRpcErrors.Contains(grpcStatus.Value)); // if gRPC pipeline handled the request (gRPC always answers OK)
 
-                        return grpcStatus == null &&
-                               serverErrors.Contains(httpStatusCode) || // if the server send an error before gRPC pipeline
-                               httpStatusCode == HttpStatusCode.OK &&
-                               gRpcErrors.Contains(grpcStatus.Value); // if gRPC pipeline handled the request (gRPC always answers OK)
+                        Log.Warning($"{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
+                        if (!hasConnectionIssue)
+                        {
+                            Log.Information($"Request Passed:{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
+                            return false;
+                        }
+                        
+                        Log.Warning($"Connection Issue:{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
+                        return true;
+
                     })
-                    .WaitAndRetryAsync(RetryCount, (input) => TimeSpan.FromSeconds(RetryBaseIntervalInSecond + input),
+                    .WaitAndRetryAsync(RetryCount, (input) => TimeSpan.FromSeconds(RetryBaseIntervalInSecond * (input+1)),
                         (result, timeSpan, retryCount, context) =>
                         {
                             var grpcStatus = StatusManager.GetStatusCode(result.Result);
-                            Console.WriteLine($"Request failed with {grpcStatus}. Retry");
+                            var httpStatusCode = result.Result.StatusCode;
+                            Log.Warning($"Request failed with grpcStatus:{grpcStatus}, httpStatusCode:{httpStatusCode}. Retry");
                         });
             };
-            
+
             services.AddGrpcClient<Greeter.GreeterClient>(o =>
             {
                 o.Address = new Uri("http://localhost:5001");
             }).ConfigureHttpClient(o =>
             {
                 //Add for macOS
-                o.DefaultRequestVersion = new Version(2,0);
+                o.DefaultRequestVersion = new Version(2, 0);
             }).ConfigureChannel(o =>
             {
                 o.Credentials = ChannelCredentials.Insecure;
             }).AddPolicyHandler(retryFunc);
+            
+            
+            services.AddControllers();
+            services.AddSwaggerGen();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -82,10 +98,29 @@ namespace GrpcClientFactory.Lab.Client
         {
             if (env.IsDevelopment())
             {
-                app.UseDeveloperExceptionPage();
+                // app.UseDeveloperExceptionPage();
             }
+            
+            // Enable middleware to serve generated Swagger as a JSON endpoint.
+            app.UseSwagger();
+                
+            // Enable middleware to serve swagger-ui (HTML, JS, CSS, etc.),
+            // specifying the Swagger JSON endpoint.
+            app.UseSwaggerUI(c =>
+            {
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1");
+            });
 
             app.UseRouting();
+            
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+                endpoints.MapGet("/", async context =>
+                {
+                    await context.Response.WriteAsync("Hello World!");
+                });
+            });
         }
     }
 }
