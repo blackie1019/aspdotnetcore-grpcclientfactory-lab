@@ -2,6 +2,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Linq;
+using System.Net.Sockets;
 using Grpc.Core;
 using GrpcClientFactory.Lab.Client.BackgroundServices;
 using Microsoft.AspNetCore.Builder;
@@ -17,7 +18,7 @@ namespace GrpcClientFactory.Lab.Client
     public class Startup
     {
         private const int RetryCount = 3;
-        private const int RetryBaseIntervalInSecond = 3;
+        private const int RetryBaseIntervalInSecond = 1;
 
         // This method gets called by the runtime. Use this method to add services to the container.
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
@@ -42,39 +43,47 @@ namespace GrpcClientFactory.Lab.Client
                 StatusCode.Unavailable,
                 StatusCode.Unknown
             };
+            
+            var retryPolicy = Policy.Handle<HttpRequestException>(requestException =>
+                {
+                    Log.Warning(requestException.Message);
 
-            Func<HttpRequestMessage, IAsyncPolicy<HttpResponseMessage>> retryFunc = request =>
-            {
-                return Policy.HandleResult<HttpResponseMessage>(r =>
+                    return true;
+                }).OrResult<HttpResponseMessage>(response =>
+                {
+
+                    var grpcStatus = StatusManager.GetStatusCode(response);
+                    var httpStatusCode = response.StatusCode;
+
+                    var hasConnectionIssue = grpcStatus == null &&
+                                             serverErrors.Contains(
+                                                 httpStatusCode) || // if the server send an error before gRPC pipeline
+                                             (httpStatusCode == HttpStatusCode.OK &&
+                                              gRpcErrors.Contains(grpcStatus
+                                                  .Value)); // if gRPC pipeline handled the request (gRPC always answers OK)
+
+                    Log.Warning($"{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
+                    if (!hasConnectionIssue)
                     {
+                        Log.Information($"Request Passed:{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
 
-                        var grpcStatus = StatusManager.GetStatusCode(r);
-                        var httpStatusCode = r.StatusCode;
-                        
-                        var hasConnectionIssue = grpcStatus == null &&
-                                                 serverErrors.Contains(httpStatusCode) || // if the server send an error before gRPC pipeline
-                                                 (httpStatusCode == HttpStatusCode.OK &&
-                                                 gRpcErrors.Contains(grpcStatus.Value)); // if gRPC pipeline handled the request (gRPC always answers OK)
+                        return false;
+                    }
 
-                        Log.Warning($"{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
-                        if (!hasConnectionIssue)
-                        {
-                            Log.Information($"Request Passed:{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
-                            return false;
-                        }
-                        
-                        Log.Warning($"Connection Issue:{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
-                        return true;
+                    Log.Warning($"Connection Issue:{grpcStatus.ToString()}, {httpStatusCode.ToString()}");
 
-                    })
-                    .WaitAndRetryAsync(RetryCount, (input) => TimeSpan.FromSeconds(RetryBaseIntervalInSecond * (input+1)),
-                        (result, timeSpan, retryCount, context) =>
-                        {
-                            var grpcStatus = StatusManager.GetStatusCode(result.Result);
-                            var httpStatusCode = result.Result.StatusCode;
-                            Log.Warning($"Request failed with grpcStatus:{grpcStatus}, httpStatusCode:{httpStatusCode}. Retry");
-                        });
-            };
+                    return true;
+
+                })
+                .WaitAndRetryAsync(RetryCount,
+                    retryAttempt => TimeSpan.FromSeconds(Math.Pow(RetryBaseIntervalInSecond + 1, retryAttempt)),
+                    (result, timeSpan, retryCount, context) =>
+                    {
+                        Log.Warning(
+                            result.Exception == null
+                                ? $"Request failed with grpcStatus:{StatusManager.GetStatusCode(result.Result).ToString()}, httpStatusCode: {result.Result.StatusCode.ToString()}. Retry:{retryCount}"
+                                : $"Request failed with Exception:{result.Exception.Message}, Retry:{retryCount}");
+                    });
 
             services.AddGrpcClient<Greeter.GreeterClient>(o =>
             {
@@ -86,8 +95,7 @@ namespace GrpcClientFactory.Lab.Client
             }).ConfigureChannel(o =>
             {
                 o.Credentials = ChannelCredentials.Insecure;
-            }).AddPolicyHandler(retryFunc);
-            
+            }).AddPolicyHandler(retryPolicy);
             
             services.AddControllers();
             services.AddSwaggerGen();
