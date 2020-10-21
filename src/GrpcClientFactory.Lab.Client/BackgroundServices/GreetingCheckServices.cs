@@ -26,7 +26,7 @@ namespace GrpcClientFactory.Lab.Client.BackgroundServices
                 }
                 catch (Exception e)
                 {
-                    //Log.Error(e.Message, e.StackTrace);
+                    Log.Error(e.Message, e.StackTrace);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
